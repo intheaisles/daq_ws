@@ -1,0 +1,33 @@
+# Live rates printed in the bag launch terminal. expected_hz values match the
+# current D455 YAML and IWR6843ISK frameCfg. A rate below 90% is reported LOW.
+topics:
+  /camera/camera/color/image_raw/compressed:
+    label: RGB
+    type: sensor_msgs/msg/CompressedImage
+    expected_hz: 15.0
+  /camera/camera/depth/image_rect_raw/compressedDepth:
+    label: Depth
+    type: sensor_msgs/msg/CompressedImage
+    expected_hz: 30.0
+  # CameraInfo is emitted once per IR frame and avoids a second subscription
+  # to each large raw IR image solely for rate monitoring.
+  /camera/camera/infra1/camera_info:
+    label: IR1
+    type: sensor_msgs/msg/CameraInfo
+    expected_hz: 30.0
+  /camera/camera/infra2/camera_info:
+    label: IR2
+    type: sensor_msgs/msg/CameraInfo
+    expected_hz: 30.0
+  /camera/camera/accel/sample:
+    label: Accel
+    type: sensor_msgs/msg/Imu
+    expected_hz: 200.0
+  /camera/camera/gyro/sample:
+    label: Gyro
+    type: sensor_msgs/msg/Imu
+    expected_hz: 200.0
+  /iwr6843_pcl:
+    label: Radar
+    type: sensor_msgs/msg/PointCloud2
+    expected_hz: 30.0

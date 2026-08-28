@@ -1,0 +1,19 @@
+# Topics stored by bag_record.launch.py.
+#
+# RGB and depth use image_transport compression. Stereo infrared and IMU stay
+# raw for VINS-Fusion. The visualization-only RGB-D cloud is intentionally not
+# recorded because it can be regenerated from the saved depth, color,
+# CameraInfo, and TF data.
+topics:
+  /camera/camera/color/image_raw/compressed: sensor_msgs/msg/CompressedImage
+  /camera/camera/color/camera_info: sensor_msgs/msg/CameraInfo
+  /camera/camera/depth/image_rect_raw/compressedDepth: sensor_msgs/msg/CompressedImage
+  /camera/camera/depth/camera_info: sensor_msgs/msg/CameraInfo
+  /camera/camera/infra1/image_rect_raw: sensor_msgs/msg/Image
+  /camera/camera/infra1/camera_info: sensor_msgs/msg/CameraInfo
+  /camera/camera/infra2/image_rect_raw: sensor_msgs/msg/Image
+  /camera/camera/infra2/camera_info: sensor_msgs/msg/CameraInfo
+  /camera/camera/accel/sample: sensor_msgs/msg/Imu
+  /camera/camera/gyro/sample: sensor_msgs/msg/Imu
+  /iwr6843_pcl: sensor_msgs/msg/PointCloud2
+  /tf_static: tf2_msgs/msg/TFMessage

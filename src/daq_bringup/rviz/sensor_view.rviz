@@ -1,0 +1,116 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /D455 RGB-D Cloud1
+        - /IWR6843 Radar1
+      Splitter Ratio: 0.5
+    Tree Height: 610
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 18; 20; 24
+    Fixed Frame: camera_link
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Ground Grid
+      Enabled: true
+      Reference Frame: camera_link
+      Plane: XY
+      Cell Size: 0.5
+      Plane Cell Count: 20
+      Color: 100; 110; 125
+      Alpha: 0.6
+    - Class: rviz_default_plugins/Axes
+      Name: D455 camera_link
+      Enabled: true
+      Reference Frame: camera_link
+      Length: 0.5
+      Radius: 0.02
+    - Class: rviz_default_plugins/Axes
+      Name: IWR6843 iwr6843_frame
+      Enabled: true
+      Reference Frame: iwr6843_frame
+      Length: 0.7
+      Radius: 0.025
+    - Class: rviz_default_plugins/PointCloud2
+      Name: D455 RGB-D Cloud
+      Enabled: true
+      Topic:
+        Value: /camera/camera/depth/color/points
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+        Filter size: 10
+      Alpha: 1
+      Position Transformer: XYZ
+      Color Transformer: RGB8
+      Style: Flat Squares
+      Size (Pixels): 2
+      Size (m): 0.01
+      Decay Time: 0
+      Selectable: true
+      Use Fixed Frame: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: IWR6843 Radar
+      Enabled: true
+      Topic:
+        Value: /iwr6843_pcl
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+        Filter size: 10
+      Alpha: 1
+      Position Transformer: XYZ
+      Color Transformer: FlatColor
+      Color: 255; 220; 0
+      Style: Flat Squares
+      Size (Pixels): 8
+      Size (m): 0.05
+      Decay Time: 0.3
+      Selectable: true
+      Use Fixed Frame: true
+  Enabled: true
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 6
+      Focal Point:
+        X: 2.5
+        Y: 0
+        Z: 0
+      Pitch: 0.35
+      Yaw: 3.14
+      Target Frame: <Fixed Frame>
+      Near Clip Distance: 0.01
+      Value: Orbit (rviz)
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Views:
+    collapsed: false
+  Width: 1500
+  X: 50
+  Y: 50

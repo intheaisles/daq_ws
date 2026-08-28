@@ -1,0 +1,46 @@
+# RealSense ROS 2 launch parameters for D455 data acquisition.
+# This is a flat mapping because realsense2_camera/rs_launch.py loads the file
+# through its config_file launch argument.
+
+camera_name: camera
+camera_namespace: camera
+device_type: d455
+# A hardware reset disconnects a usbip-attached device from WSL. Keep it off;
+# power-cycle or reattach the camera explicitly when a reset is required.
+initial_reset: false
+
+# RGB is not a VINS/EGO estimator input. Run it at 15 Hz to reduce compressed
+# bag size while retaining a useful calibration and point-cloud texture stream.
+enable_color: true
+rgb_camera.color_profile: 640x480x15
+rgb_camera.color_format: RGB8
+
+# The validated D455 stereo VINS configuration uses 848x480 IR1/IR2. Keep
+# depth on the same 848x480 geometry for the real-camera EGO adapter. Thirty
+# frames per second preserves visual-inertial and obstacle-update timing.
+enable_depth: true
+enable_infra: false
+enable_infra1: true
+enable_infra2: true
+depth_module.depth_profile: 848x480x30
+depth_module.infra_profile: 848x480x30
+depth_module.depth_format: Z16
+depth_module.infra1_format: Y8
+depth_module.infra2_format: Y8
+
+# Preserve both raw IMU streams and also publish the linearly interpolated
+# combined IMU at the gyro rate.
+enable_accel: true
+enable_gyro: true
+unite_imu_method: 2
+
+# Camera bringup publishes sensor streams only. RGB-depth decoding,
+# registration, and PointCloud2 generation belong to the later visualization
+# or bag-replay pipeline.
+enable_sync: false
+align_depth.enable: false
+pointcloud.enable: false
+
+# Publish the factory-calibrated internal D455 frame tree.
+publish_tf: true
+tf_publish_rate: 0.0

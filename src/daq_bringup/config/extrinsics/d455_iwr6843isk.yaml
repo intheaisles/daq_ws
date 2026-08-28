@@ -1,0 +1,19 @@
+# Pose of the raw iwr6843_frame expressed in camera_link.
+#
+# This is only the current physical measurement and mounting-axis estimate. It
+# is suitable for checking the live visualization pipeline, but it is not a
+# calibrated radar-camera extrinsic transform.
+calibrated: false
+parent_frame: camera_link
+child_frame: iwr6843_frame
+
+translation_m:
+  x: -0.010
+  y: -0.045
+  z: -0.070
+
+# Raw radar +x -> camera_link +z, +y -> +x, +z -> +y.
+rotation_rpy_rad:
+  roll: 0.0
+  pitch: -1.5707963267948966
+  yaw: -1.5707963267948966

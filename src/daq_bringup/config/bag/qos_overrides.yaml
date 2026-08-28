@@ -1,0 +1,64 @@
+# Explicit recorder subscription QoS. Sensor streams use Best Effort so the
+# recorder is compatible with RealSense SensorDataQoS and the Reliable radar
+# publisher. /tf_static must be Transient Local because the camera publishes
+# its factory transforms before recording starts.
+/camera/camera/color/image_raw/compressed:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/color/camera_info:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/depth/image_rect_raw/compressedDepth:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/depth/camera_info:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/infra1/image_rect_raw:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/infra1/camera_info:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/infra2/image_rect_raw:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/infra2/camera_info:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 10
+/camera/camera/accel/sample:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 200
+/camera/camera/gyro/sample:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 200
+/iwr6843_pcl:
+  reliability: best_effort
+  durability: volatile
+  history: keep_last
+  depth: 50
+/tf_static:
+  reliability: reliable
+  durability: transient_local
+  history: keep_last
+  depth: 100
