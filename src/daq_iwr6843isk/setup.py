@@ -16,6 +16,7 @@ setup(
         (f"share/{package_name}", ["package.xml"]),
     ],
     install_requires=["setuptools"],
+    tests_require=["pytest"],
     zip_safe=True,
     maintainer="hoyoung",
     maintainer_email="hoyoung@todo.todo",
@@ -24,6 +25,7 @@ setup(
     entry_points={
         "console_scripts": [
             "pcl_pub = daq_iwr6843isk.pcl_publisher:main",
+            "radar_point_viewer = daq_iwr6843isk.viewer:main",
         ],
     },
 )

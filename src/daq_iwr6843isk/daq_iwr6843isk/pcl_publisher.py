@@ -1,461 +1,305 @@
 # Copyright 2016 Open Source Robotics Foundation, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2026 DAQ workspace contributors
+# Licensed under the Apache License, Version 2.0.
+"""Publish each complete TI hardware frame once, including zero-point frames."""
 
-#from detected_points import Detected_Points
-import rclpy
-from rclpy.node import Node
-import os
-import time
-import numpy as np
-import threading
-from std_msgs.msg import Float64
-import std_msgs.msg
-from sensor_msgs.msg import PointCloud2
-from sensor_msgs.msg import PointField
-from std_msgs.msg import Header
-import serial
-import struct
+import hashlib
+import json
+from pathlib import Path
+import queue
 import sys
-import signal
+import threading
+import time
+
+import numpy as np
+import rclpy
+from rclpy.executors import ExternalShutdownException
+from rclpy.node import Node
+from sensor_msgs.msg import PointCloud2, PointField
+import serial
+from std_msgs.msg import String
+
+from .experiment import TrialRecorder, load_roi, trial_settings
+from .protocol import FrameSequence, PacketStream, config_commands, config_summary
+from .mounting import Mounting
+from .paths import default_output_root
 
 
-DEBUG=False
-MAGIC_WORD_ARRAY = np.array([2, 1, 4, 3, 6, 5, 8, 7])
-MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-MSG_AZIMUT_STATIC_HEAT_MAP = 8
-ms_per_frame = 9999.0
-global shut_down
-shut_down = 0
-global data_port
-data_port = '/dev/ttyUSB1'
-global cli_port
-cli_port = '/dev/ttyUSB0'
-global got_args
-got_args = False
-username = os.path.expanduser('~')
-global cfg_path
-cfg_path = username+'/ros2_ws/src/iwr6843isk_ros2/cfg_files/xwr68xx_profile_30Hz.cfg'
-
-class TI:
-    def __init__(self, sdk_version=3.4,  cli_baud=115200,data_baud=921600, num_rx=4, num_tx=3,
-                 verbose=False, connect=True, mode=0,cli_loc="",data_loc="", cfg_path=""):
-        super(TI, self).__init__()
-        self.connected = False
-        self.verbose = verbose
-        self.mode = mode
-        self.cfg_path = cfg_path
-        if connect:
-            self.cli_port = serial.Serial(cli_loc, cli_baud)
-            self.data_port = serial.Serial(data_loc, data_baud)
-            self.connected = True
-        self.sdk_version = sdk_version
-        self.num_rx_ant = num_rx
-        self.num_tx_ant = num_tx
-        self.num_virtual_ant = num_rx * num_tx
-        if mode == 0:
-            self._initialize()
-
-    
-    def _configure_radar(self, config):
-        for i in config:
-            self.cli_port.write((i + '\n').encode())
-            print(i)
-            idx = i.find('frameCfg')
-            if idx != -1:
-                global ms_per_frame
-                ms_per_frame = float(i.split()[5])
-                print("Found frameCfg, milliseconds per frame is ", i.split()[5])
-            time.sleep(0.01)
-
-    global cfg_path
-
-    def _initialize(self):
-        config = [line.rstrip('\r\n') for line in open(self.cfg_path)]
-        if self.connected:
-            self._configure_radar(config)
-
-        self.config_params = {}  # Initialize an empty dictionary to store the configuration parameters
-
-        for i in config:
-
-            # Split the line
-            split_words = i.split(" ")
-
-            # Hard code the number of antennas, change if other configuration is used
-            num_rx_ant = 4
-            num_tx_ant = 3
-
-            # Get the information about the profile configuration
-            if "profileCfg" in split_words[0]:
-                start_freq = int(split_words[2])
-                idle_time = int(split_words[3])
-                ramp_end_time = float(split_words[5])
-                freq_slope_const = int(split_words[8])
-                num_adc_samples = int(split_words[10])
-                num_adc_samples_round_to2 = 1
-
-                while num_adc_samples > num_adc_samples_round_to2:
-                    num_adc_samples_round_to2 = num_adc_samples_round_to2 * 2
-
-                dig_out_sample_rate = int(split_words[11])
-
-            # Get the information about the frame configuration    
-            elif "frameCfg" in split_words[0]:
-
-                chirp_start_idx = int(split_words[1])
-                chirp_end_idx = int(split_words[2])
-                num_loops = int(split_words[3])
-                num_frames = int(split_words[4])
-                frame_periodicity = float(split_words[5])
-
-        # Combine the read data to obtain the configuration parameters
-        num_chirps_per_frame = (chirp_end_idx - chirp_start_idx + 1) * num_loops
-        self.config_params["numDopplerBins"] = num_chirps_per_frame / num_tx_ant
-        self.config_params["numRangeBins"] = num_adc_samples_round_to2
-        self.config_params["rangeResolutionMeters"] = (3e8 * dig_out_sample_rate * 1e3) / (
-                2 * freq_slope_const * 1e12 * num_adc_samples)
-        self.config_params["rangeIdxToMeters"] = (3e8 * dig_out_sample_rate * 1e3) / (
-                2 * freq_slope_const * 1e12 * self.config_params["numRangeBins"])
-        self.config_params["dopplerResolutionMps"] = 3e8 / (
-                2 * start_freq * 1e9 * (idle_time + ramp_end_time) * 1e-6 * self.config_params[
-                    "numDopplerBins"] * num_tx_ant)
-        self.config_params["maxRange"] = (300 * 0.9 * dig_out_sample_rate) / (2 * freq_slope_const * 1e3)
-        self.config_params["maxVelocity"] = 3e8 / (
-                    4 * start_freq * 1e9 * (idle_time + ramp_end_time) * 1e-6 * num_tx_ant)
+# Keep intensity as the SNR alias for existing RViz layouts; also expose named fields.
+CLOUD_FIELDS = [('x', 0), ('y', 4), ('z', 8), ('intensity', 12),
+                ('doppler', 16), ('snr', 20), ('noise', 24)]
 
 
-    def close(self):
-        """End connection between radar and machine
-
-        Returns:
-            None
-
-        """
-        print("Shutting down sensor")
-        self.cli_port.write('sensorStop\n'.encode())
-        self.cli_port.close()
-        self.data_port.close()
-
-    def _read_buffer(self):
-        """
-
-        Returns:
-
-        """
-        byte_buffer = self.data_port.read(self.data_port.in_waiting)
-
-        return byte_buffer
-
-    def _parse_header_data(self, byte_buffer, idx):
-        """Parses the byte buffer for the header of the data
-
-        Args:
-            byte_buffer: Buffer with TLV data
-            idx: Current reading index of the byte buffer
-
-        Returns:
-            Tuple [Tuple (int), int]
-
-        """
-        magic, idx = self._unpack(byte_buffer, idx, order='>', items=1, form='Q')
-        (version, length, platform, frame_num, cpu_cycles, num_obj, num_tlvs), idx = self._unpack(byte_buffer, idx,
-                                                                                                    items=7, form='I')
-        subframe_num, idx = self._unpack(byte_buffer, idx, items=1, form='I')
-        return (version, length, platform, frame_num, cpu_cycles, num_obj, num_tlvs, subframe_num), idx
-    
-    def _parse_header_tlv(self, byte_buffer, idx):
-        """ Parses the byte buffer for the header of a tlv
-
-        """
-        (tlv_type, tlv_length), idx = self._unpack(byte_buffer, idx, items=2, form='I')
-        return (tlv_type, tlv_length), idx
-
-    def _parse_msg_detected_points(self, byte_buffer, idx):
-        """ Parses the information of the detected points message
-
-        """
-        (x,y,z,vel), idx = self._unpack(byte_buffer, idx, items=4, form='f')
-       
-        return (x,y,z,vel), idx
-
-    def _process_detected_points(self, byte_buffer):
-            """
-            点云 (+ side info: SNR/noise, TLV type 7, only if guiMonitor exports it)
-            """
-            idx = byte_buffer.index(MAGIC_WORD)
-            header_data, idx = self._parse_header_data(byte_buffer, idx)
-            # print(header_data,idx)
-
-            num_tlvs=header_data[6]
-
-            # Columns: [x, y, z, vel, snr_db, noise_db]. snr/noise stay NaN when
-            # the side-info TLV is absent (guiMonitor detectedObjects != side-info).
-            data=np.zeros((0,6),dtype=np.float32)
-            num_points=0
-
-            # Walk every TLV by type instead of assuming the first one is the
-            # point cloud -- required to reach the side-info TLV, which comes
-            # after the range-profile/stats TLVs.
-            for _ in range(num_tlvs):
-                (tlv_type, tlv_length), idx = self._parse_header_tlv(byte_buffer, idx)
-
-                if tlv_type == 1:   # detected points (x, y, z, doppler)
-                    num_points=int(tlv_length/16)
-                    data=np.full((num_points,6),np.nan,dtype=np.float32)
-                    for i in range(num_points):
-                        ( x, y, z,vel), idx = self._parse_msg_detected_points(byte_buffer, idx)
-                        data[i][0]=x
-                        data[i][1]=y
-                        data[i][2]=z
-                        data[i][3]=vel
-
-                elif tlv_type == 7 and num_points > 0:   # side info: int16 snr, int16 noise (0.1 dB units)
-                    for i in range(num_points):
-                        (snr, noise), idx = self._unpack(byte_buffer, idx, items=2, form='h')
-                        data[i][4]=snr*0.1
-                        data[i][5]=noise*0.1
-
-                else:   # skip TLVs we don't use (range profile, stats, heatmaps, ...)
-                    idx += tlv_length
-
-            return data
-    @staticmethod
-    def _unpack(byte_buffer, idx, order='', items=1, form='I'):
-        """Helper function for parsing binary byte data
-
-        Args:
-            byte_buffer: Buffer with data
-            idx: Curex in the buffer
-            order: Little endian or big endian
-            items: Number of items to be extracted
-            form: Data type to be extracted
-
-        Returns:rent ind
-            Tuple [Tuple (object), int]
-
-        """
-        size = {'H': 2, 'h': 2, 'I': 4, 'Q': 8, 'f': 4}
-        try:
-            data = struct.unpack(order + str(items) + form, byte_buffer[idx:idx + (items * size[form])])
-            if len(data) == 1:
-                data = data[0]
-            return data, idx + (items * size[form])
-        except:
-            return None
+def make_cloud(frame, stamp_ns):
+    points = frame.points
+    packed = np.column_stack((points[:, :3], points[:, 4], points[:, 3], points[:, 4:])).astype('<f4')
+    message = PointCloud2()
+    message.header.frame_id = 'iwr6843_frame'
+    message.header.stamp.sec, message.header.stamp.nanosec = divmod(int(stamp_ns), 1_000_000_000)
+    message.height = 1
+    message.width = len(points)
+    message.fields = [PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+                      for name, offset in CLOUD_FIELDS]
+    message.is_bigendian = False
+    message.point_step = 28
+    message.row_step = 28 * len(points)
+    message.is_dense = bool(np.all(np.isfinite(packed)))
+    message.data = packed.tobytes()
+    return message
 
 
-class Detected_Points:
-
-    def __init__(self,cli_loc=cli_port,data_loc=data_port, cfg_path=cfg_path):
-
-        self.MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-        self.ti=TI(cli_loc=cli_loc,data_loc=data_loc,cfg_path=cfg_path)
-        self.interval=ms_per_frame/1000 # 1000 raise more?
-        self.data=b''
-        self.warn=0
-
-
-    def data_stream_iterator(self):
-        
-        while 1:
-
-            time.sleep(self.interval)
-            byte_buffer=self.ti._read_buffer()
-            
-            if(len(byte_buffer)==0):
-                self.warn+=1
-            else:
-                self.warn=0
-            if(self.warn>100):#连续10次空读取则退出 / after 10 empty frames
-                print("Wrong")
-                break
-        
-            self.data+=byte_buffer
-        
-            try:
-                idx1 = self.data.index(MAGIC_WORD)   
-                idx2 = self.data.index(MAGIC_WORD,idx1+1)
-
-            except:
-                continue
-
-            self.data=self.data[idx2:]
-            points=self.ti._process_detected_points(byte_buffer)
-            ret=points[:,:3]
-            snr=points[:,4]   # NaN per point when side info not enabled
-
-            yield ret, snr
-            
-
-            global shut_down
-
-            if shut_down == 1:
-                break
+def send_command(port, command, timeout_s=8.0):
+    """Wait for the OOB CLI response; never assume writing means applied."""
+    port.write((command + '\n').encode('ascii'))
+    port.flush()
+    response = bytearray()
+    deadline = time.monotonic() + timeout_s
+    last_data = time.monotonic()
+    while time.monotonic() < deadline:
+        data = port.read(max(1, port.in_waiting))
+        if data:
+            response.extend(data)
+            last_data = time.monotonic()
+        text = response.decode('utf-8', errors='replace')
+        lowered = text.lower()
+        if any(token in lowered for token in ('error', 'exception', 'not recognized', 'invalid usage')):
+            raise RuntimeError(f'Radar rejected {command!r}: {text.strip()}')
+        done = 'Done' in text or (command == 'sensorStop' and 'already stopped' in lowered)
+        if done and (text.rstrip().endswith(':/>') or time.monotonic() - last_data >= 0.15):
+            return text
+    raise RuntimeError(f'Radar CLI timeout for {command!r}: {response.decode(errors="replace")}')
 
 
-        self.ti.close()
-
-
-xyzdata = []
-snrdata = []
-xyz_mutex = False # True = locked, false = open
-
-class MinimalPublisher(Node):
+class RadarPublisher(Node):
     def __init__(self):
         super().__init__('iwr6843_pcl_pub')
+        defaults = {
+            'cfg_path': '', 'cli_port': '/dev/ttyUSB0', 'data_port': '/dev/ttyUSB1',
+            'record_trial': False, 'output_root': default_output_root(), 'mounting_file': '',
+            'plane_distance_m': 0.0, 'incidence_angle_deg': 0.0, 'trial_id': 'trial1',
+            'duration_s': 0.0, 'roi_file': '', 'scan_timeout_s': 3.0, 'off_axis_deg': '',
+        }
+        for key, value in defaults.items():
+            self.declare_parameter(key, value)
+        self.parameters = {key: self.get_parameter(key).value for key in defaults}
+        self.finished = False
+        self.closed = False
+        self.stop_reason = 'interrupted'
+        self.cli = self.data = self.recorder = None
+        self.reader = None
+        self.stop_event = threading.Event()
+        self.pending = queue.Queue(maxsize=2048)
+        self.parser = PacketStream()
+        self.sequence = FrameSequence()
+        self.reader_error = None
+        self.queue_dropped = 0
+        self.raw_bytes = 0
+        self.received_frames = 0
+        self.reported_frames = 0
+        self.empty_frames = 0
+        self.last_scan_details = {}
+        self.startup_error = None
+        self.first_receive = self.last_receive = None
+        self.started = self.last_report = time.monotonic()
+        self.cli_responses = []
+        self.publisher = self.create_publisher(PointCloud2, '/iwr6843_pcl', 100)
+        self.info_publisher = self.create_publisher(String, '/iwr6843_scan_info', 100)
+        try:
+            self._start()
+        except Exception as error:
+            self.startup_error = str(error)
+            self.close('startup_error')
+            self.destroy_node()
+            raise
+        self.timer = self.create_timer(0.005, self.tick)
 
-        global cfg_path
-        global data_port
-        global cli_port
+    def _start(self):
+        p = self.parameters
+        if self.get_parameter('use_sim_time').value:
+            raise ValueError('Live acquisition requires use_sim_time=false')
+        if not np.isfinite(p['scan_timeout_s']) or p['scan_timeout_s'] <= 0:
+            raise ValueError('scan_timeout_s must be finite and positive')
+        if not np.isfinite(p['duration_s']) or p['duration_s'] < 0:
+            raise ValueError('duration_s must be finite and nonnegative')
+        cfg_path = Path(p['cfg_path']).expanduser().resolve()
+        cfg_text = cfg_path.read_text(encoding='utf-8')
+        commands = config_commands(cfg_text)
+        self.cfg_summary = config_summary(cfg_text)
+        self.cfg_hash = hashlib.sha256(cfg_text.encode()).hexdigest()
+        self.mounting = Mounting.load(p['mounting_file']) if p['mounting_file'] else None
+        if Path(p['cli_port']).resolve() == Path(p['data_port']).resolve():
+            raise ValueError('CLI and data ports must be different')
+        if p['record_trial']:
+            settings = trial_settings(p['plane_distance_m'], p['incidence_angle_deg'],
+                                      p['trial_id'], p['duration_s'], p['off_axis_deg'])
+            self.recorder = TrialRecorder(p['output_root'], settings, cfg_text, cfg_path,
+                                          load_roi(p['roi_file']), runtime={
+                                              'parameters': p, 'argv': sys.argv,
+                                              'radar_config': self.cfg_summary}, mounting=self.mounting)
+            self.get_logger().info(f'Trial output: {self.recorder.path}')
+            if self.recorder.roi is None:
+                self.get_logger().info('No ROI: recording ALL radar points; glass support rate is unavailable.')
+        self.cli = serial.Serial(p['cli_port'], 115200, timeout=0.05, write_timeout=2)
+        self.data = serial.Serial(p['data_port'], 921600, timeout=0.05)
+        self.cli.reset_input_buffer()
+        self.data.reset_input_buffer()
+        # Stop first even if the supplied config omitted sensorStop.
+        if commands[0] != 'sensorStop':
+            commands.insert(0, 'sensorStop')
+        for command in commands:
+            response = send_command(self.cli, command)
+            self.cli_responses.append({'command': command, 'response': response})
+        if self.recorder:
+            self.recorder.configured(self.cli_responses)
+        self.started = self.last_report = time.monotonic()
+        self.reader = threading.Thread(target=self._read, name='radar-uart', daemon=True)
+        self.reader.start()
+        self.get_logger().info('Radar started; one cloud per hardware frame, including empty frames.')
 
-        self.declare_parameter('data_port', data_port)
-        self.declare_parameter('cli_port', cli_port)
-        self.declare_parameter('cfg_path', cfg_path)        
+    def _read(self):
+        try:
+            while not self.stop_event.is_set():
+                data = self.data.read(min(max(1, self.data.in_waiting), 65536))
+                if not data:
+                    continue
+                stamp = self.get_clock().now().nanoseconds
+                received = time.monotonic()
+                self.raw_bytes += len(data)
+                if self.recorder:
+                    self.recorder.raw_file.write(data)
+                for frame in self.parser.feed(data):
+                    try:
+                        self.pending.put_nowait((frame, stamp, received))
+                    except queue.Full:
+                        self.queue_dropped += 1
+        except Exception as error:
+            if not self.stop_event.is_set():
+                self.reader_error = str(error)
 
-        data_port = self.get_parameter('data_port').get_parameter_value().string_value
-        cli_port = self.get_parameter('cli_port').get_parameter_value().string_value
-        cfg_path = self.get_parameter('cfg_path').get_parameter_value().string_value
-
-        global got_args
-        got_args = True
-
-        global ms_per_frame
-        while ms_per_frame > 5000:
-            pass
-
-        self.publisher_ = self.create_publisher(PointCloud2, 'iwr6843_pcl', 10)
-        timer_period = float(ms_per_frame/1000)
-        self.timer = self.create_timer(timer_period, self.timer_callback)
-
-
-    def timer_callback(self):
-        global xyz_mutex, xyzdata, snrdata
-        while xyz_mutex == True:
-            pass
-        if len(xyzdata) > 0:
-            xyz_mutex == True
-            xyz_arr = np.asarray(xyzdata).astype(np.float32) # on form [[x,y,z],[x,y,z],[x,y,z]..]
-            # per-point SNR (dB) becomes the 'intensity' channel; 0 for every
-            # point when side info is off (NaN) so they all render one colour.
-            snr_arr = np.asarray(snrdata, dtype=np.float32).reshape(-1)
-            if snr_arr.size != xyz_arr.shape[0]:
-                snr_arr = np.zeros(xyz_arr.shape[0], dtype=np.float32)
-            snr_arr = np.nan_to_num(snr_arr, nan=0.0)
-            cloud_arr = np.column_stack([xyz_arr, snr_arr]).astype(np.float32) # [[x,y,z,snr],..]
-            pcl_msg = PointCloud2()
-            pcl_msg.header = std_msgs.msg.Header()
-            pcl_msg.header.stamp = self.get_clock().now().to_msg()
-            pcl_msg.header.frame_id = 'iwr6843_frame' ########################################
-            pcl_msg.height = 1 # because unordered cloud
-            pcl_msg.width = cloud_arr.shape[0] # number of points in cloud
-            # define interpretation of pointcloud message (offset is in bytes, float32 is 4 bytes)
-            pcl_msg.fields =   [PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-                                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-                                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-                                PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1)]
-            #cloud_msg.is_bigendian = False # assumption
-            pcl_msg.point_step = cloud_arr.dtype.itemsize*cloud_arr.shape[1] #size of 1 point (float32 * 4 = 16 bytes)
-            pcl_msg.row_step = pcl_msg.point_step*cloud_arr.shape[0] # only 1 row because unordered
-            pcl_msg.is_dense = True
-            pcl_msg.data = cloud_arr.tobytes()
-            self.publisher_.publish(pcl_msg)
-            xyz_mutex = False
-            # self.get_logger().info('Publishing %d points' % cloud_arr.shape[0])
-
-
-class iwr6843_interface(object):
-    def __init__(self):
-
-        self.stream = 0
-
-    def update(self):
-        xyz, snr =next(self.stream)
-        global xyz_mutex, xyzdata, snrdata
-        while xyz_mutex == True:
-            pass
-        xyz_mutex = True
-        # print("New set of points")
-        #print(data)
-        xyzdata = xyz
-        snrdata = snr
-        xyz_mutex = False
-
-
-    def get_data(self):
-
-        global got_args
-        while got_args == False:
-            pass
-
-        print("cli_port: ", cli_port)
-        print("data_port: ", data_port)
-        print("cfg_path: ", cfg_path)
-
-        detected_points=Detected_Points(cli_port, data_port, cfg_path)
-        self.stream = detected_points.data_stream_iterator()
-
-        while 1:
+    def tick(self):
+        if self.finished:
+            return
+        duration = self.parameters['duration_s']
+        for _ in range(256):
             try:
-                self.update()
-                time.sleep(ms_per_frame/2000) # sample twice as fast as radar output rate, feels smoother
+                frame, stamp, received = self.pending.get_nowait()
+            except queue.Empty:
+                break
+            if self.first_receive is not None and duration > 0 and received - self.first_receive > duration:
+                self.stop_reason = 'duration_completed'
+                self.finished = True
+                break
+            accepted, gap, discontinuity = self.sequence.accept(frame.frame_number)
+            if not accepted:
+                continue
+            if self.first_receive is None:
+                self.first_receive = received
+            self.last_receive = received
+            self.received_frames += 1
+            self.empty_frames += int(len(frame.points) == 0)
+            details = self.recorder.record(frame, stamp, gap, discontinuity) if self.recorder else {}
+            self.last_scan_details = details
+            info = {'frame_number': frame.frame_number, 'host_stamp_ns': stamp,
+                    'cpu_cycles': frame.cpu_cycles, 'subframe_number': frame.subframe_number,
+                    'sdk_version_header': frame.version, 'platform_header': frame.platform,
+                    'point_count': len(frame.points), 'missing_frames_before': gap,
+                    'sequence_discontinuity': discontinuity, 'cfg_sha256': self.cfg_hash,
+                    **details}
+            if self.recorder:
+                info['trial'] = self.recorder.settings
+                info['trial_directory'] = str(self.recorder.path)
+            self.publisher.publish(make_cloud(frame, stamp))
+            self.info_publisher.publish(String(data=json.dumps(info, allow_nan=False)))
+        now = time.monotonic()
+        if self.reader_error:
+            self.get_logger().error(f'UART reader failed: {self.reader_error}')
+            self.stop_reason, self.finished = 'serial_error', True
+        elif not self.finished and now - (self.last_receive or self.started) > self.parameters['scan_timeout_s']:
+            self.get_logger().error('No fresh hardware frames; NOT treating timeout as zero detections.')
+            self.stop_reason, self.finished = 'scan_timeout', True
+        elif not self.finished and self.first_receive is not None and duration > 0 and now - self.first_receive >= duration:
+            # Drain queued observations before ending a finite trial.
+            if self.pending.empty():
+                self.stop_reason, self.finished = 'duration_completed', True
+        if now - self.last_report >= 2:
+            hz = (self.received_frames - self.reported_frames) / (now - self.last_report)
+            self.reported_frames = self.received_frames
+            self.last_report = now
+            text = (f'Radar={hz:.1f} Hz, hardware frames={self.received_frames}, empty={self.empty_frames}, '
+                    f'missing={self.sequence.missing}, duplicates={self.sequence.duplicates}, '
+                    f'parse_errors={self.parser.malformed_packets}, queue_dropped={self.queue_dropped}')
+            if self.recorder:
+                recorder = self.recorder
+                text += f', ROI support={recorder.supporting_frames}/{recorder.frames}' if recorder.roi else ', ROI=unset (all-point data)'
+                snr_key = 'roi_snr_median_db' if recorder.roi else 'snr_median_db'
+                snr = self.last_scan_details.get(snr_key)
+                text += f', last scan SNR={snr:.1f} dB' if snr is not None else ', last scan SNR=unavailable'
+                recorder.flush()
+            self.get_logger().info(text)
 
-            except Exception as exception:
+    def diagnostics(self):
+        return {'missing_frame_numbers': self.sequence.missing,
+                'duplicate_frames_dropped': self.sequence.duplicates,
+                'sequence_discontinuities': self.sequence.discontinuities,
+                'malformed_packets': self.parser.malformed_packets,
+                'discarded_uart_bytes': self.parser.discarded_bytes,
+                'incomplete_uart_bytes_at_stop': len(self.parser.buffer),
+                'queue_dropped_frames': self.queue_dropped,
+                'unprocessed_frames_at_stop': self.pending.qsize(),
+                'raw_uart_bytes': self.raw_bytes, 'reader_error': self.reader_error,
+                'startup_error': self.startup_error}
 
-                global shut_down
-                if shut_down == 1:
-                    return
+    def close(self, reason=None):
+        if self.closed:
+            return
+        self.closed = True
+        self.stop_event.set()
+        if self.reader:
+            self.reader.join(timeout=2)
+        try:
+            if self.cli and self.cli.is_open:
+                self.cli.write(b'sensorStop\n')
+                self.cli.flush()
+        except (OSError, serial.SerialException):
+            pass
+        finally:
+            for port in (self.data, self.cli):
+                if port and port.is_open:
+                    port.close()
+        if self.recorder:
+            # Preserve successful command responses even if startup failed later.
+            from .experiment import write_json
+            write_json(self.recorder.path / 'cli_responses.json', self.cli_responses)
+            self.recorder.close(reason or self.stop_reason, self.diagnostics())
+            self.get_logger().info(f'Trial saved: {self.recorder.path} ({reason or self.stop_reason})')
 
-                print(exception)
-                self.stream = detected_points.data_stream_iterator()
-                # return
 
-
-def ctrlc_handler(signum, frame):
-    #res = input("Ctrl-c was pressed. Do you really want to exit? y/n ")
-    #if res == 'y':
-    global shut_down
-    shut_down = 1
-    time.sleep(0.25)
-    print("Exiting")
-    exit(1)
- 
-
-
-def main(argv=None):
-
-
-    global cfg_path
-    global data_port
-    global cli_port
-    
-    signal.signal(signal.SIGINT, ctrlc_handler)
-
-    #init
-    iwr6843_interface_node = iwr6843_interface()
-    get_data_thread = threading.Thread(target=iwr6843_interface_node.get_data)
-    get_data_thread.start()
-
-    rclpy.init()
-    minimal_publisher = MinimalPublisher()
-
-    rclpy.spin(minimal_publisher)
-    #shutdown
-    get_data_thread.join()
-    minimal_publisher.destroy_node()
-    rclpy.shutdown()
+def main(args=None):
+    rclpy.init(args=args)
+    node = None
+    code = 0
+    try:
+        node = RadarPublisher()
+        while rclpy.ok() and not node.finished:
+            rclpy.spin_once(node, timeout_sec=0.05)
+        if node.stop_reason not in ('duration_completed', 'interrupted'):
+            code = 1
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    except Exception as error:
+        print(f'Radar acquisition failed: {error}', file=sys.stderr)
+        if node:
+            node.stop_reason = 'processing_error'
+        code = 1
+    finally:
+        if node:
+            node.close()
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == '__main__':
     main()
-    

@@ -16,4 +16,5 @@ topics:
   /camera/camera/accel/sample: sensor_msgs/msg/Imu
   /camera/camera/gyro/sample: sensor_msgs/msg/Imu
   /iwr6843_pcl: sensor_msgs/msg/PointCloud2
+  /iwr6843_scan_info: std_msgs/msg/String
   /tf_static: tf2_msgs/msg/TFMessage

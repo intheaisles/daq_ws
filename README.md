@@ -3,6 +3,37 @@
 ROS 2 Humble workspace for acquiring Intel RealSense D455 and TI IWR6843ISK
 sensor data.
 
+## Distance / incidence-angle radar trials
+
+After building and sourcing this workspace, run a radar-only trial:
+
+```bash
+ros2 launch daq_bringup radar_distance_angle_test.launch.py \
+  plane_distance_m:=1.0 incidence_angle_deg:=30.0 \
+  off_axis_deg:=0.0 trial_id:=d1_a30_repeat1 duration_s:=30.0 rviz:=true
+```
+
+This starts the radar itself; stop any existing radar driver first. Distance is
+the perpendicular distance to the glass plane in meters. Angle is the signed
+incidence to a fixed glass reference point in degrees. Results go to
+`~/workspace/daq_ws/outputs/radar_trials/<timestamp>_<trial_id>/`, including condition metadata, the exact
+radar config, CLI responses, per-scan/per-point CSV, raw UART, and a summary.
+Without an explicitly measured `roi_file`, statistics describe all radar
+points and no glass support rate is reported. See the
+[Korean trial guide](docs/RADAR_DISTANCE_ANGLE_TEST.md) for geometry, ROI,
+FoV comparisons, output definitions, and validation.
+
+The viewer applies the saved mounting transform and shows each point's XYZ
+in `camera_link` (forward/left/up), sensor range, and SNR in a docked RViz table.
+Points show only scan indices; the radar origin and frame axes remain visible. Raw coordinates remain in
+`iwr6843_frame`; CSV also includes mounted coordinates and a copy of the mounting
+YAML. The current mounting is an uncalibrated estimate and is labeled as such.
+Open only the viewer for an already running driver with:
+
+```bash
+ros2 launch daq_bringup radar_view.launch.py
+```
+
 The workspace contains separate D455 and IWR6843ISK bringup launch files and a
 third, visualization-only launch that overlays both sensors in RViz. Rosbag
 recording remains separate from visualization.
@@ -87,7 +118,15 @@ ros2 launch daq_bringup iwr6843isk.launch.py \
 The driver publishes `sensor_msgs/msg/PointCloud2` on `/iwr6843_pcl` with
 frame ID `iwr6843_frame`.
 
-Start the radar with its standalone PointCloud2 configuration:
+Each complete hardware frame is published once, including empty frames.
+Old points are never republished on a timer. Fields are
+`x,y,z,intensity,doppler,snr,noise`; `intensity` aliases SNR in dB for RViz.
+Missing side information remains NaN. `/iwr6843_scan_info` carries hardware
+frame numbers, receive timestamps, gap indicators, and the config hash.
+Live acquisition stops on missing fresh hardware frames (default 3 seconds),
+which is distinct from receiving a normal zero-point frame.
+
+Start the radar with its mounted XYZ/SNR viewer:
 
 ```bash
 ros2 launch daq_bringup iwr6843isk.launch.py rviz:=true
@@ -143,7 +182,7 @@ ros2 launch daq_bringup bag_record.launch.py bag_name:=2m_0_test1
 The output layout is:
 
 ```text
-~/daq_bags/YYYYMMDD/<bag_name>_YYYYMMDD_HHMMSS/bag/
+~/workspace/daq_ws/outputs/daq_bags/YYYYMMDD/<bag_name>_YYYYMMDD_HHMMSS/bag/
   bag_0.db3
   metadata.yaml
 ```

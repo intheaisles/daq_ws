@@ -57,6 +57,11 @@
   durability: volatile
   history: keep_last
   depth: 50
+/iwr6843_scan_info:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 100
 /tf_static:
   reliability: reliable
   durability: transient_local

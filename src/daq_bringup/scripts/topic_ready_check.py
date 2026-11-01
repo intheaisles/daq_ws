@@ -13,6 +13,7 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu, PointCloud2
+from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 
@@ -22,6 +23,7 @@ MESSAGE_TYPES = {
     "sensor_msgs/msg/Image": Image,
     "sensor_msgs/msg/Imu": Imu,
     "sensor_msgs/msg/PointCloud2": PointCloud2,
+    "std_msgs/msg/String": String,
     "tf2_msgs/msg/TFMessage": TFMessage,
 }
 
