@@ -9,3 +9,20 @@ metadata.yaml
 __pycache__/
 *.pyc
 .pytest_cache/
+outputs/
+
+# 촬영물과 로컬 생성물은 논문 참조용 코드 저장소에 올리지 않는다.
+data/
+models/
+.venv/
+*.bag
+*.bag.active
+*.db3-wal
+*.db3-shm
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.m4v
+symlink_install_manifest.txt
