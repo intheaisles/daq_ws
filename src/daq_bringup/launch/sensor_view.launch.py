@@ -145,6 +145,11 @@ def generate_launch_description():
             depth_throttle,
             register_depth,
             textured_pointcloud,
+            Node(package="daq_iwr6843isk", executable="radar_point_viewer",
+                 name="radar_point_viewer",
+                 parameters=[{"mounting_file": LaunchConfiguration("extrinsics_file"),
+                              "publish_mount_tf": False}],
+                 output="screen"),
             rviz,
         ]
     )

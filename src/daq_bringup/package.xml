@@ -11,6 +11,10 @@
 
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>rviz_common</depend>
+  <depend>pluginlib</depend>
+  <build_depend>qtbase5-dev</build_depend>
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>compressed_depth_image_transport</exec_depend>

@@ -1,0 +1,10 @@
+{
+  "frame_id": "iwr6843_frame",
+  "center_m": [0.0, 2.0, 0.0],
+  "normal": [0.0, 1.0, 0.0],
+  "horizontal_axis": [0.0, 0.0, 1.0],
+  "width_m": 1.0,
+  "height_m": 1.0,
+  "plane_tolerance_m": 0.2,
+  "edge_exclusion_m": 0.1
+}

@@ -1,0 +1,5 @@
+<library path="radar_panel">
+  <class name="daq_bringup/RadarPanel" type="daq_bringup::RadarPanel" base_class_type="rviz_common::Panel">
+    <description>Current radar scan table with mounting-frame XYZ, SNR, and sensor origin.</description>
+  </class>
+</library>

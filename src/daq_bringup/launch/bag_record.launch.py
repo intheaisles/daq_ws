@@ -19,6 +19,7 @@ from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
+from daq_iwr6843isk.paths import default_output_root
 
 
 VALID_BAG_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]*$")
@@ -233,7 +234,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "output_root",
-                default_value=str(Path.home() / "daq_bags"),
+                default_value=default_output_root("daq_bags"),
                 description="Root directory for date/run/bag output folders",
             ),
             DeclareLaunchArgument(
