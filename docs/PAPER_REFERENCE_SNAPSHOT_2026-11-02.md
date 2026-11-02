@@ -24,4 +24,4 @@
 
 ## 업로드 제외
 
-build/install/log/outputs/bags/data/models/.venv,원본bag·동영상·캡처·bytecode를커밋하지않는다. 이스냅샷은코드·설정·시험코드·분석문서만포함한다. 개인공간에서촬영한RGB는올리지않는다.
+build/install/log/outputs/bags/data/models/.venv,원본bag·동영상·캡처·bytecode를커밋하지않는다. 이스냅샷은코드·설정·시험코드·분석문서만포함한다.
